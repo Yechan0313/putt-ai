@@ -1,4 +1,4 @@
-name: Build iOS .ipa
+name: Build iOS .ipa (Pure Swift)
 
 on:
   push:
@@ -11,19 +11,9 @@ defaults:
 
 jobs:
   build:
-    name: iOS Build (AltStore용)
+    name: Swift iOS Build (AltStore용)
     runs-on: macos-15
 
-    # ─────────────────────────────────────────────────────────────
-    # 이 env 블록이 핵심 수정 사항입니다.
-    #
-    # xcodebuild 빌드 설정(KEY=VALUE)은 중첩 xcodebuild에 상속되지 않음.
-    # 셸 환경변수(env:)는 모든 자식 프로세스에 자동 전파됨.
-    #
-    # ExpoModulesJSI 빌드 스크립트([CP-User])가 내부에서 xcodebuild를
-    # 중첩 호출하는데, 이 중첩 빌드도 서명을 시도해서 실패했던 것.
-    # 환경변수로 설정하면 중첩 xcodebuild도 서명 없이 실행됨.
-    # ─────────────────────────────────────────────────────────────
     env:
       CODE_SIGN_IDENTITY: ""
       CODE_SIGNING_REQUIRED: "NO"
@@ -31,104 +21,31 @@ jobs:
       DEVELOPMENT_TEAM: ""
       PROVISIONING_PROFILE: ""
       PROVISIONING_PROFILE_SPECIFIER: ""
-      RCT_NEW_ARCH_ENABLED: "0"
-      NEW_ARCH_ENABLED: "0"
-      EXPO_NO_GIT_STATUS: "1"
 
     steps:
-      # ── 1. 체크아웃 ───────────────────────────────────────────
+      # ── 1. 체크아웃 ──────────────────────────────────────────────
       - uses: actions/checkout@v5
 
-      # ── 2. Node.js 22 ────────────────────────────────────────
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: 'npm'
+      # ── 2. xcodegen 설치 ─────────────────────────────────────────
+      - name: Install xcodegen
+        run: brew install xcodegen
 
-      # ── 3. npm 의존성 설치 ────────────────────────────────────
-      - name: Install npm dependencies
-        run: npm ci
+      # ── 3. Xcode 프로젝트 생성 ───────────────────────────────────
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
 
-      # ── 4. Expo Prebuild ──────────────────────────────────────
-      - name: Expo Prebuild (iOS)
-        run: npx expo prebuild --platform ios --non-interactive --clean
-
-      # ── 5. Podfile.properties.json 강제 패치 ─────────────────
-      #   expo prebuild 이후 생성된 파일에 신규 아키텍처 비활성화 확인
-      - name: Patch Podfile.properties (disable new arch)
+      # ── 4. 빌드 확인용 구조 출력 ─────────────────────────────────
+      - name: Show project structure
         run: |
-          node -e "
-            const fs = require('fs');
-            const p = JSON.parse(fs.readFileSync('ios/Podfile.properties.json', 'utf8'));
-            p['newArchEnabled'] = 'false';
-            fs.writeFileSync('ios/Podfile.properties.json', JSON.stringify(p, null, 2));
-            console.log('Podfile.properties.json:', p);
-          "
+          ls -la
+          xcodebuild -project PuttAI.xcodeproj -list
 
-      # ── 6. CocoaPods 설치 ─────────────────────────────────────
-      - name: CocoaPods install
-        run: cd ios && pod install --no-repo-update
-
-      # ── 7. ios/ 구조 확인 (디버깅) ───────────────────────────
-      - name: Show ios/ contents
+      # ── 5. xcodebuild (서명 없음, arm64) ─────────────────────────
+      - name: Build (unsigned)
         run: |
-          ls -la ios/
-          find ios -maxdepth 1 \( -name "*.xcworkspace" -o -name "*.xcodeproj" \)
-
-      # ── 8. 워크스페이스·스킴 동적 감지 ──────────────────────
-      - name: Detect Xcode workspace and scheme
-        id: xcode
-        run: |
-          WS=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
-
-          if [ -z "$WS" ]; then
-            echo "WARNING: .xcworkspace not found, falling back to .xcodeproj"
-            WS=$(find ios -maxdepth 1 -name "*.xcodeproj" | head -1)
-            echo "use_project=true" >> $GITHUB_OUTPUT
-          else
-            echo "use_project=false" >> $GITHUB_OUTPUT
-          fi
-
-          if [ -z "$WS" ]; then
-            echo "ERROR: No workspace or project found"
-            ls ios/
-            exit 1
-          fi
-
-          SCHEME=$(xcodebuild -workspace "$WS" -list 2>/dev/null \
-            | awk '/Schemes:/{f=1;next} f && /[[:graph:]]/{print $1; exit}')
-
-          if [ -z "$SCHEME" ]; then
-            SCHEME=$(xcodebuild -project "$(find ios -maxdepth 1 -name '*.xcodeproj' | head -1)" -list 2>/dev/null \
-              | awk '/Schemes:/{f=1;next} f && /[[:graph:]]/{print $1; exit}')
-          fi
-
-          echo "workspace=$WS"  >> $GITHUB_OUTPUT
-          echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
-          echo "→ Workspace : $WS"
-          echo "→ Scheme    : $SCHEME"
-
-      # ── 9. xcodebuild ────────────────────────────────────────
-      #   서명 플래그를 env:(셸 환경변수) + KEY=VALUE(빌드 설정) 양쪽에 설정.
-      #   env: 블록 변수는 job 레벨에서 이미 선언되어 있으므로
-      #   중첩 xcodebuild 호출에도 자동 전파됨.
-      - name: xcodebuild (unsigned, arm64)
-        run: |
-          export NODE_BINARY=$(which node)
-
-          WS="${{ steps.xcode.outputs.workspace }}"
-          SCHEME="${{ steps.xcode.outputs.scheme }}"
-
-          if [ "${{ steps.xcode.outputs.use_project }}" = "true" ]; then
-            WS_FLAG="-project"
-          else
-            WS_FLAG="-workspace"
-          fi
-
           xcodebuild \
-            $WS_FLAG "$WS" \
-            -scheme   "$SCHEME" \
+            -project PuttAI.xcodeproj \
+            -scheme PuttAI \
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
@@ -139,15 +56,10 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            NODE_BINARY="$NODE_BINARY" \
-            RCT_NEW_ARCH_ENABLED=0 \
-            NEW_ARCH_ENABLED=0 \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
-            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
             ENABLE_BITCODE=NO \
             build
 
-      # ── 10. .app → .ipa 패키징 ───────────────────────────────
+      # ── 6. .app → .ipa 패키징 ────────────────────────────────────
       - name: Package .ipa
         run: |
           APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products" \
@@ -166,9 +78,8 @@ jobs:
           zip -r putt-ai.ipa Payload
           ls -lh putt-ai.ipa
 
-      # ── 11. Artifact 업로드 ───────────────────────────────────
-      - name: Upload .ipa artifact
-        uses: actions/upload-artifact@v5
+      # ── 7. Artifact 업로드 ───────────────────────────────────────
+      - uses: actions/upload-artifact@v5
         with:
           name: putt-ai-ipa
           path: ${{ runner.temp }}/putt-ai.ipa

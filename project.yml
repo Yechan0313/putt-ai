@@ -1,0 +1,24 @@
+name: PuttAI
+
+options:
+  bundleIdPrefix: com.runble6
+  deploymentTarget:
+    iOS: "16.4"
+  createIntermediateGroups: true
+
+targets:
+  PuttAI:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    info:
+      path: Sources/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.runble6.puttai
+        IPHONEOS_DEPLOYMENT_TARGET: "16.4"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5"
+        ENABLE_BITCODE: "NO"
+        DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
