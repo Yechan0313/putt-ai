@@ -25,5 +25,10 @@
   "private": true,
   "workspaces": [
     "modules/*"
-  ]
+  ],
+  "expo": {
+    "autolinking": {
+      "exclude": ["lidar-sensor"]
+    }
+  }
 }

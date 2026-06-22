@@ -7,69 +7,106 @@ on:
 
 defaults:
   run:
-    shell: bash -eo pipefail {0}   # 파이프 포함 모든 명령 실패 시 즉시 중단
+    shell: bash -eo pipefail {0}
 
 jobs:
   build:
     name: iOS Build (AltStore용)
-    runs-on: macos-15               # Xcode 16, macOS 15 Sequoia
+    runs-on: macos-15
 
     steps:
-      # ── 1. 코드 체크아웃 ─────────────────────────────────────
+      # ── 1. 체크아웃 ───────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── 2. Node.js 22 (20은 deprecated) ──────────────────────
+      # ── 2. Node.js 22 ────────────────────────────────────────
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
-      # ── 3. 의존성 설치 (워크스페이스 포함) ───────────────────
+      # ── 3. 의존성 설치 ────────────────────────────────────────
       - name: Install npm dependencies
         run: npm ci
 
-      # ── 4. iOS 네이티브 프로젝트 생성 ────────────────────────
-      - name: Expo Prebuild (iOS)
+      # ── 4. iOS 네이티브 프로젝트 생성 ─────────────────────────
+      #   --clean : ios/ 디렉터리 초기화 후 재생성
+      #   lidar-sensor는 package.json expo.autolinking.exclude 로 제외
+      #   (자체 podspec이 CI에서 pod install 실패시키는 문제 방지)
+      - name: Expo Prebuild
         env:
-          EXPO_NO_GIT_STATUS: 1          # git 상태 체크 스킵
+          EXPO_NO_GIT_STATUS: 1
         run: npx expo prebuild --platform ios --non-interactive --clean
 
-      # ── 5. 생성된 프로젝트 구조 확인 (디버깅용) ──────────────
-      - name: Show generated iOS project info
+      # ── 5. pod install (prebuild 후 명시적으로 실행) ──────────
+      #   prebuild가 CI 환경에서 pod install을 건너뛰는 경우 대비
+      - name: CocoaPods install
         run: |
-          echo "=== ios/ directory ==="
+          cd ios
+          pod install --no-repo-update 2>&1
+
+      # ── 6. ios/ 구조 확인 (디버깅) ───────────────────────────
+      - name: Show ios/ contents after pod install
+        run: |
+          echo "=== ios/ top-level ==="
           ls -la ios/
           echo ""
-          echo "=== Xcode workspace & schemes ==="
-          WS=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
-          xcodebuild -workspace "$WS" -list
+          echo "=== Xcode workspace list ==="
+          find ios -maxdepth 1 \( -name "*.xcworkspace" -o -name "*.xcodeproj" \)
 
-      # ── 6. 워크스페이스·스킴 동적 감지 ──────────────────────
-      - name: Detect workspace and scheme
+      # ── 7. 워크스페이스·스킴 동적 감지 ──────────────────────
+      #   xcworkspace 없으면 xcodeproj fallback
+      - name: Detect Xcode workspace and scheme
         id: xcode
         run: |
           WS=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
+
+          if [ -z "$WS" ]; then
+            echo "WARNING: .xcworkspace not found, falling back to .xcodeproj"
+            WS=$(find ios -maxdepth 1 -name "*.xcodeproj" | head -1)
+            echo "use_project=true" >> $GITHUB_OUTPUT
+          else
+            echo "use_project=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -z "$WS" ]; then
+            echo "ERROR: No Xcode workspace or project found in ios/"
+            ls ios/
+            exit 1
+          fi
+
+          # 스킴 이름: -workspace or -project 모두 동작
           SCHEME=$(xcodebuild -workspace "$WS" -list 2>/dev/null \
-            | awk '/Schemes:/{f=1; next} f && /[[:graph:]]/{print $1; exit}')
+            | awk '/Schemes:/{f=1;next} f && /[[:graph:]]/{print $1; exit}')
 
-          echo "workspace=$WS"   >> $GITHUB_OUTPUT
-          echo "scheme=$SCHEME"  >> $GITHUB_OUTPUT
-          echo "→ Workspace : $WS"
-          echo "→ Scheme    : $SCHEME"
+          if [ -z "$SCHEME" ]; then
+            # xcodeproj fallback으로 시도
+            SCHEME=$(xcodebuild -project "$(find ios -maxdepth 1 -name "*.xcodeproj" | head -1)" -list 2>/dev/null \
+              | awk '/Schemes:/{f=1;next} f && /[[:graph:]]/{print $1; exit}')
+          fi
 
-      # ── 7. xcodebuild — 서명 없이 arm64 실기기 빌드 ──────────
-      #   CODE_SIGN_IDENTITY=""          : 서명 ID 비움
-      #   CODE_SIGNING_REQUIRED=NO       : 서명 불필요
-      #   CODE_SIGNING_ALLOWED=NO        : 서명 허용 안 함
-      #   DEVELOPMENT_TEAM=""            : 팀 ID 비움 (핵심 누락 원인)
-      #   PROVISIONING_PROFILE*=""       : 프로파일 비움
-      #   ONLY_ACTIVE_ARCH=NO            : arm64 포함 전 아키텍처 빌드
-      - name: xcodebuild (unsigned device build)
+          echo "workspace=$WS"  >> $GITHUB_OUTPUT
+          echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
+          echo "→ Workspace/Project : $WS"
+          echo "→ Scheme            : $SCHEME"
+
+      # ── 8. xcodebuild — 서명 없이 arm64 실기기 빌드 ──────────
+      - name: xcodebuild (unsigned, arm64 device)
         run: |
+          WS="${{ steps.xcode.outputs.workspace }}"
+          SCHEME="${{ steps.xcode.outputs.scheme }}"
+          USE_PROJECT="${{ steps.xcode.outputs.use_project }}"
+
+          # workspace vs project 플래그 선택
+          if [ "$USE_PROJECT" = "true" ]; then
+            WS_FLAG="-project"
+          else
+            WS_FLAG="-workspace"
+          fi
+
           xcodebuild \
-            -workspace "${{ steps.xcode.outputs.workspace }}" \
-            -scheme    "${{ steps.xcode.outputs.scheme }}" \
+            $WS_FLAG "$WS" \
+            -scheme   "$SCHEME" \
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
@@ -82,15 +119,14 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="" \
             build
 
-      # ── 8. DerivedData에서 .app 찾아 .ipa 패키징 ─────────────
+      # ── 9. .app → .ipa 패키징 ────────────────────────────────
       - name: Package .ipa
         run: |
-          # 시뮬레이터 경로 제외하고 실기기용 .app 탐색
           APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products" \
             -maxdepth 2 -name "*.app" | head -1)
 
           if [ -z "$APP" ]; then
-            echo "ERROR: .app not found in DerivedData"
+            echo "ERROR: .app not found. DerivedData contents:"
             find "$RUNNER_TEMP/DerivedData" -name "*.app" 2>/dev/null || true
             exit 1
           fi
@@ -102,7 +138,7 @@ jobs:
           zip -r putt-ai.ipa Payload
           ls -lh putt-ai.ipa
 
-      # ── 9. .ipa artifact 업로드 (7일 보관) ───────────────────
+      # ── 10. .ipa 업로드 ───────────────────────────────────────
       - name: Upload .ipa artifact
         uses: actions/upload-artifact@v4
         with:
