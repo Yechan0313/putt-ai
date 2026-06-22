@@ -30,12 +30,14 @@ jobs:
         run: npm ci
 
       # ── 4. iOS 네이티브 프로젝트 생성 ─────────────────────────
-      #   --clean : ios/ 디렉터리 초기화 후 재생성
-      #   lidar-sensor는 package.json expo.autolinking.exclude 로 제외
-      #   (자체 podspec이 CI에서 pod install 실패시키는 문제 방지)
+      #   NEW_ARCH_ENABLED=0 : 신규 아키텍처(JSI) 비활성화
+      #     → ExpoModulesJSI xcframework 빌드 스크립트 실행 안 됨
+      #     → CI에서 가장 흔한 빌드 실패 원인 제거
       - name: Expo Prebuild
         env:
           EXPO_NO_GIT_STATUS: 1
+          NEW_ARCH_ENABLED: 0
+          RCT_NEW_ARCH_ENABLED: 0
         run: npx expo prebuild --platform ios --non-interactive --clean
 
       # ── 5. pod install (prebuild 후 명시적으로 실행) ──────────
@@ -123,6 +125,10 @@ jobs:
             PROVISIONING_PROFILE="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             NODE_BINARY="$NODE_BIN" \
+            RCT_NEW_ARCH_ENABLED=0 \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            ENABLE_BITCODE=NO \
             build
 
       # ── 9. .app → .ipa 패키징 ────────────────────────────────
