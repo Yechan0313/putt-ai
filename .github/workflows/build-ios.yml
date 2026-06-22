@@ -97,12 +97,17 @@ jobs:
           SCHEME="${{ steps.xcode.outputs.scheme }}"
           USE_PROJECT="${{ steps.xcode.outputs.use_project }}"
 
-          # workspace vs project 플래그 선택
           if [ "$USE_PROJECT" = "true" ]; then
             WS_FLAG="-project"
           else
             WS_FLAG="-workspace"
           fi
+
+          # NODE_BINARY: expo-constants Pod의 빌드 스크립트가
+          # app.config 생성을 위해 node를 직접 실행함.
+          # xcodebuild 프로세스는 PATH를 제한적으로 상속하므로
+          # 명시적으로 node 경로를 전달해야 exit 65를 방지할 수 있음.
+          NODE_BIN=$(which node)
 
           xcodebuild \
             $WS_FLAG "$WS" \
@@ -117,6 +122,7 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
+            NODE_BINARY="$NODE_BIN" \
             build
 
       # ── 9. .app → .ipa 패키징 ────────────────────────────────
