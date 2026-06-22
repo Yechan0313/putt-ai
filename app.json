@@ -9,8 +9,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "plugins": [
-      "expo-camera",
-      "expo-dev-client"
+      "expo-camera"
     ],
     "ios": {
       "supportsTablet": false,
