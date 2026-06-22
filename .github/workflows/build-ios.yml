@@ -3,66 +3,52 @@ name: Build iOS .ipa
 on:
   push:
     branches: [main]
-  workflow_dispatch:   # 수동 실행 버튼
+  workflow_dispatch:
 
 jobs:
   build:
     name: iOS Build (AltStore용)
-    runs-on: macos-15   # Xcode 16 포함
+    runs-on: macos-15
 
     steps:
-      # 1. 코드 체크아웃
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Node.js 설치
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
-      # 3. 의존성 설치
       - name: Install dependencies
         run: npm ci
 
-      # 4. Expo CLI 설치
-      - name: Install Expo CLI
-        run: npm install -g expo-cli @expo/cli
-
-      # 5. iOS 네이티브 프로젝트 생성 (expo prebuild)
       - name: Expo Prebuild (iOS)
         run: npx expo prebuild --platform ios --non-interactive
 
-      # 6. Xcode 빌드 — 서명 없이 arm64 아카이브 생성
+      - name: Show Xcode schemes
+        run: xcodebuild -workspace ios/putt-ai.xcworkspace -list
+
       - name: Build Archive (unsigned)
         run: |
           xcodebuild archive \
             -workspace ios/putt-ai.xcworkspace \
             -scheme putt-ai \
             -configuration Release \
-            -archivePath $RUNNER_TEMP/putt-ai.xcarchive \
+            -archivePath "$RUNNER_TEMP/putt-ai.xcarchive" \
             -destination "generic/platform=iOS" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || true
+            CODE_SIGNING_ALLOWED=NO
 
-      # 7. .ipa 추출 (서명 없는 export)
       - name: Export .ipa
         run: |
-          mkdir -p $RUNNER_TEMP/ipa
-
-          # xcarchive → .app 복사
-          APP_PATH=$(find $RUNNER_TEMP/putt-ai.xcarchive -name "*.app" | head -1)
-          mkdir -p $RUNNER_TEMP/ipa/Payload
-          cp -r "$APP_PATH" $RUNNER_TEMP/ipa/Payload/
-
-          # .ipa 생성 (= Payload 폴더를 zip한 것)
-          cd $RUNNER_TEMP/ipa
+          APP_PATH=$(find "$RUNNER_TEMP/putt-ai.xcarchive" -name "*.app" | head -1)
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -r "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/"
+          cd "$RUNNER_TEMP/ipa"
           zip -r ../putt-ai.ipa Payload
 
-      # 8. .ipa를 Actions artifact로 업로드
       - name: Upload .ipa
         uses: actions/upload-artifact@v4
         with:
