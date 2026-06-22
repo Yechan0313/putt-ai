@@ -1,0 +1,9 @@
+{
+  "name": "lidar-sensor",
+  "version": "1.0.0",
+  "description": "ARKit LiDAR distance measurement module for PuttAI",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo-modules-core": "*"
+  }
+}

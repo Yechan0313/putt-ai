@@ -2,12 +2,24 @@
   "expo": {
     "name": "putt-ai",
     "slug": "putt-ai",
+    "owner": "runble6",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-camera",
+      "expo-dev-client"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.runble6.puttai",
+      "deploymentTarget": "14.0",
+      "infoPlist": {
+        "NSCameraUsageDescription": "LiDAR 거리 측정을 위해 카메라 접근이 필요합니다.",
+        "NSMotionUsageDescription": "경사 감지를 위해 자이로스코프 접근이 필요합니다.",
+        "UIRequiredDeviceCapabilities": ["arkit"]
+      }
     },
     "android": {
       "adaptiveIcon": {
