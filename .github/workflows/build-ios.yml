@@ -5,51 +5,105 @@ on:
     branches: [main]
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash -eo pipefail {0}   # 파이프 포함 모든 명령 실패 시 즉시 중단
+
 jobs:
   build:
     name: iOS Build (AltStore용)
-    runs-on: macos-15
+    runs-on: macos-15               # Xcode 16, macOS 15 Sequoia
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── 1. 코드 체크아웃 ─────────────────────────────────────
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      # ── 2. Node.js 22 (20은 deprecated) ──────────────────────
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
+      # ── 3. 의존성 설치 (워크스페이스 포함) ───────────────────
+      - name: Install npm dependencies
         run: npm ci
 
+      # ── 4. iOS 네이티브 프로젝트 생성 ────────────────────────
       - name: Expo Prebuild (iOS)
-        run: npx expo prebuild --platform ios --non-interactive
+        env:
+          EXPO_NO_GIT_STATUS: 1          # git 상태 체크 스킵
+        run: npx expo prebuild --platform ios --non-interactive --clean
 
-      - name: Show Xcode schemes
-        run: xcodebuild -workspace ios/putt-ai.xcworkspace -list
-
-      - name: Build Archive (unsigned)
+      # ── 5. 생성된 프로젝트 구조 확인 (디버깅용) ──────────────
+      - name: Show generated iOS project info
         run: |
-          xcodebuild archive \
-            -workspace ios/putt-ai.xcworkspace \
-            -scheme putt-ai \
+          echo "=== ios/ directory ==="
+          ls -la ios/
+          echo ""
+          echo "=== Xcode workspace & schemes ==="
+          WS=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
+          xcodebuild -workspace "$WS" -list
+
+      # ── 6. 워크스페이스·스킴 동적 감지 ──────────────────────
+      - name: Detect workspace and scheme
+        id: xcode
+        run: |
+          WS=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
+          SCHEME=$(xcodebuild -workspace "$WS" -list 2>/dev/null \
+            | awk '/Schemes:/{f=1; next} f && /[[:graph:]]/{print $1; exit}')
+
+          echo "workspace=$WS"   >> $GITHUB_OUTPUT
+          echo "scheme=$SCHEME"  >> $GITHUB_OUTPUT
+          echo "→ Workspace : $WS"
+          echo "→ Scheme    : $SCHEME"
+
+      # ── 7. xcodebuild — 서명 없이 arm64 실기기 빌드 ──────────
+      #   CODE_SIGN_IDENTITY=""          : 서명 ID 비움
+      #   CODE_SIGNING_REQUIRED=NO       : 서명 불필요
+      #   CODE_SIGNING_ALLOWED=NO        : 서명 허용 안 함
+      #   DEVELOPMENT_TEAM=""            : 팀 ID 비움 (핵심 누락 원인)
+      #   PROVISIONING_PROFILE*=""       : 프로파일 비움
+      #   ONLY_ACTIVE_ARCH=NO            : arm64 포함 전 아키텍처 빌드
+      - name: xcodebuild (unsigned device build)
+        run: |
+          xcodebuild \
+            -workspace "${{ steps.xcode.outputs.workspace }}" \
+            -scheme    "${{ steps.xcode.outputs.scheme }}" \
+            -sdk iphoneos \
             -configuration Release \
-            -archivePath "$RUNNER_TEMP/putt-ai.xcarchive" \
-            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            build
 
-      - name: Export .ipa
+      # ── 8. DerivedData에서 .app 찾아 .ipa 패키징 ─────────────
+      - name: Package .ipa
         run: |
-          APP_PATH=$(find "$RUNNER_TEMP/putt-ai.xcarchive" -name "*.app" | head -1)
-          mkdir -p "$RUNNER_TEMP/ipa/Payload"
-          cp -r "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/"
-          cd "$RUNNER_TEMP/ipa"
-          zip -r ../putt-ai.ipa Payload
+          # 시뮬레이터 경로 제외하고 실기기용 .app 탐색
+          APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products" \
+            -maxdepth 2 -name "*.app" | head -1)
 
-      - name: Upload .ipa
+          if [ -z "$APP" ]; then
+            echo "ERROR: .app not found in DerivedData"
+            find "$RUNNER_TEMP/DerivedData" -name "*.app" 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "→ Found .app: $APP"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -r "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -r putt-ai.ipa Payload
+          ls -lh putt-ai.ipa
+
+      # ── 9. .ipa artifact 업로드 (7일 보관) ───────────────────
+      - name: Upload .ipa artifact
         uses: actions/upload-artifact@v4
         with:
           name: putt-ai-ipa
