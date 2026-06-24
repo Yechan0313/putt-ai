@@ -72,6 +72,11 @@ jobs:
           fi
 
           echo "→ .app: $APP"
+
+          # AltStore 재서명을 위해 ad-hoc 서명 추가
+          # (서명 없는 바이너리는 AltStore가 엔타이틀먼트를 읽지 못해 설치 실패)
+          codesign --force --deep --sign - "$APP"
+
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -r "$APP" "$RUNNER_TEMP/Payload/"
           cd "$RUNNER_TEMP"
