@@ -73,9 +73,21 @@ jobs:
 
           echo "→ .app: $APP"
 
-          # AltStore 재서명을 위해 ad-hoc 서명 추가
-          # (서명 없는 바이너리는 AltStore가 엔타이틀먼트를 읽지 못해 설치 실패)
-          codesign --force --deep --sign - "$APP"
+          # AltStore 재서명용 최소 entitlements 생성
+          # get-task-allow=true: AltStore 무료 계정이 entitlements를 읽으려면 필수
+          python3 - << 'PYEOF'
+import plistlib, pathlib
+pathlib.Path('/tmp/altstore.entitlements').write_bytes(
+  plistlib.dumps({'get-task-allow': True}, fmt=plistlib.FMT_XML)
+)
+PYEOF
+
+          codesign --force --deep --sign - \
+            --entitlements /tmp/altstore.entitlements \
+            "$APP"
+
+          echo "→ 서명 확인:"
+          codesign -d --entitlements - "$APP" 2>&1 || true
 
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -r "$APP" "$RUNNER_TEMP/Payload/"

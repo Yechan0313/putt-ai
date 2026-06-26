@@ -3,7 +3,7 @@ name: PuttAI
 options:
   bundleIdPrefix: com.runble6
   deploymentTarget:
-    iOS: "16.4"
+    iOS: "14.0"
   createIntermediateGroups: true
 
 targets:
@@ -17,7 +17,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.runble6.puttai
-        IPHONEOS_DEPLOYMENT_TARGET: "16.4"
+        IPHONEOS_DEPLOYMENT_TARGET: "14.0"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5"
         ENABLE_BITCODE: "NO"

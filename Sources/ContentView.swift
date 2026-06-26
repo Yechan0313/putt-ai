@@ -1,6 +1,7 @@
 import SwiftUI
 import ARKit
 import SceneKit
+import AVFoundation
 
 // MARK: - Root View
 
@@ -44,11 +45,24 @@ struct ARCameraView: UIViewRepresentable {
         v.automaticallyUpdatesLighting = false
         v.antialiasingMode = .none
 
+        guard ARWorldTrackingConfiguration.isSupported else {
+            context.coordinator.lidarActive = false
+            return v
+        }
+
         let config = ARWorldTrackingConfiguration()
         if context.coordinator.isLidarSupported {
             config.frameSemantics = [.sceneDepth]
         }
-        v.session.run(config)
+
+        let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        if camStatus == .authorized || camStatus == .notDetermined {
+            v.session.run(config)
+        } else {
+            // 카메라 권한 거부 → AR 없이 기동
+            context.coordinator.lidarActive = false
+        }
+
         return v
     }
 
