@@ -75,12 +75,7 @@ jobs:
 
           # AltStore 재서명용 최소 entitlements 생성
           # get-task-allow=true: AltStore 무료 계정이 entitlements를 읽으려면 필수
-          python3 - << 'PYEOF'
-import plistlib, pathlib
-pathlib.Path('/tmp/altstore.entitlements').write_bytes(
-  plistlib.dumps({'get-task-allow': True}, fmt=plistlib.FMT_XML)
-)
-PYEOF
+          python3 -c "import plistlib, pathlib; pathlib.Path('/tmp/altstore.entitlements').write_bytes(plistlib.dumps({'get-task-allow': True}, fmt=plistlib.FMT_XML))"
 
           codesign --force --deep --sign - \
             --entitlements /tmp/altstore.entitlements \
